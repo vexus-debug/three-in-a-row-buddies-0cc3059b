@@ -21,6 +21,7 @@ import { PatientCreditBalanceCard } from "@/components/dashboard/PatientCreditBa
 import { CreateClaimModal } from "@/components/dashboard/CreateClaimModal";
 import { invoiceBalance } from "@/lib/arAging";
 import { dentalLineMeta } from "@/lib/billingDisplay";
+import { receiptHTML, statementHTML } from "@/lib/printDocs";
 import logo from "@/assets/logo.jpg";
 
 interface InvoiceDetailDialogProps {
@@ -258,12 +259,14 @@ export function InvoiceDetailDialog({ open, onOpenChange, invoice }: InvoiceDeta
     }
   };
 
-  const handlePrint = () => {
-    const html = getInvoiceHTML(invoice, lineItems, payments, clinic, balance, providers);
+  const openPrint = (html: string) => {
     const w = window.open("", "_blank");
     w?.document.write(html);
     w?.document.close();
   };
+  const handlePrint = () => openPrint(getInvoiceHTML(invoice, lineItems, payments, clinic, balance, providers));
+  const handleReceipt = () => openPrint(receiptHTML(invoice, lineItems, payments, clinic as any, balance));
+  const handleStatement = () => openPrint(statementHTML(invoice, lineItems, payments, clinic as any, balance));
 
   const handleEmail = () => {
     const clinicName = clinic?.name || "Clinexus";
@@ -536,6 +539,12 @@ export function InvoiceDetailDialog({ open, onOpenChange, invoice }: InvoiceDeta
               </Button>
               <Button variant="outline" size="sm" onClick={handlePrint}>
                 <Printer className="mr-1.5 h-3.5 w-3.5" />Print
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleReceipt}>
+                <Printer className="mr-1.5 h-3.5 w-3.5" />Receipt (80mm)
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleStatement}>
+                <Printer className="mr-1.5 h-3.5 w-3.5" />Statement
               </Button>
               <Button variant="outline" size="sm" onClick={handleEmail}>
                 <Mail className="mr-1.5 h-3.5 w-3.5" />Email
