@@ -28,19 +28,36 @@ export default function ExpensesPage() {
   const terms = useClinicTerms();
   const expenseCategories = [...baseExpenseCategories, terms.consumablesCategory, "other"];
   const { data: expenses = [] } = useExpenses();
+  const { data: patients = [] } = usePatients();
+  const { data: invoices = [] } = useInvoices();
   const { user } = useAuth();
   const createExpense = useCreateExpense();
   const deleteExpense = useDeleteExpense();
   const [search, setSearch] = useState("");
   const [catFilter, setCatFilter] = useState("all");
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [form, setForm] = useState({
+  const emptyForm = () => ({
     vendor: "", category: "other", description: "", amount: "",
     expense_date: format(new Date(), "yyyy-MM-dd"), payment_method: "cash", receipt_reference: "",
+    patient_id: "none", invoice_id: "none", frequency: "none" as ExpenseFrequency,
   });
+  const [form, setForm] = useState(emptyForm);
+
+  const patientName = useMemo(() => {
+    const m: Record<string, string> = {};
+    (patients as any[]).forEach((p) => { m[p.id] = `${p.first_name} ${p.last_name}`; });
+    return m;
+  }, [patients]);
+  const invoiceNumber = useMemo(() => {
+    const m: Record<string, string> = {};
+    (invoices as any[]).forEach((i) => { m[i.id] = i.invoice_number; });
+    return m;
+  }, [invoices]);
+  const patientInvoices = (invoices as any[]).filter((i) => form.patient_id === "none" || i.patient_id === form.patient_id);
 
   const filtered = expenses.filter((e: any) => {
-    const matchSearch = e.vendor.toLowerCase().includes(search.toLowerCase()) || e.description?.toLowerCase().includes(search.toLowerCase());
+    const q = search.toLowerCase();
+    const matchSearch = (e.vendor || "").toLowerCase().includes(q) || e.description?.toLowerCase().includes(q) || (e.patient_id && patientName[e.patient_id]?.toLowerCase().includes(q));
     const matchCat = catFilter === "all" || e.category === catFilter;
     return matchSearch && matchCat;
   });
@@ -50,19 +67,23 @@ export default function ExpensesPage() {
 
   const handleSubmit = () => {
     if (!form.vendor || !form.amount) return;
+    const description = [form.description.trim(), form.receipt_reference.trim() ? `Receipt: ${form.receipt_reference.trim()}` : ""].filter(Boolean).join(" · ");
     createExpense.mutate({
       vendor: form.vendor,
       category: form.category,
-      description: form.description,
+      description: description || null,
       amount: Number(form.amount),
       expense_date: form.expense_date,
       payment_method: form.payment_method,
-      receipt_reference: form.receipt_reference,
+      patient_id: form.patient_id === "none" ? null : form.patient_id,
+      invoice_id: form.invoice_id === "none" ? null : form.invoice_id,
+      is_recurring: form.frequency !== "none",
+      next_due_date: nextDueDate(form.expense_date, form.frequency),
       created_by: user?.id,
     }, {
       onSuccess: () => {
         setDialogOpen(false);
-        setForm({ vendor: "", category: "other", description: "", amount: "", expense_date: format(new Date(), "yyyy-MM-dd"), payment_method: "cash", receipt_reference: "" });
+        setForm(emptyForm());
       },
     });
   };
