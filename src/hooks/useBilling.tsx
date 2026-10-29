@@ -142,7 +142,7 @@ export function useCreateClaim() {
 export function useUpdateClaim() {
   const invalidate = useInvalidateBilling();
   return useMutation({
-    mutationFn: async ({ id, ...updates }: { id: string; status?: string; amount_paid?: number; claim_number?: string; submitted_date?: string | null; paid_date?: string | null }) => {
+    mutationFn: async ({ id, ...updates }: { id: string; status?: string; amount_paid?: number; claim_number?: string; submitted_date?: string | null; paid_date?: string | null; notes?: string | null }) => {
       const { error } = await db.from("insurance_claims").update(updates).eq("id", id);
       if (error) throw error;
     },

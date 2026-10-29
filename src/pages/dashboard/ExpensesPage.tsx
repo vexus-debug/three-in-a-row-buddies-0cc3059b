@@ -1,10 +1,14 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { Switch } from "@/components/ui/switch";
+import { usePatients } from "@/hooks/usePatients";
+import { useInvoices } from "@/hooks/useInvoices";
+import { nextDueDate, inferFrequency, type ExpenseFrequency } from "@/lib/billingDisplay";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, DollarSign, Search, TrendingDown } from "lucide-react";
+import { Plus, DollarSign, Search, TrendingDown, Repeat, User, FileText } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { useExpenses, useCreateExpense, useDeleteExpense } from "@/hooks/useExpenses";
 import { useAuth } from "@/hooks/useAuth";
@@ -28,19 +32,36 @@ export default function ExpensesPage() {
   const terms = useClinicTerms();
   const expenseCategories = [...baseExpenseCategories, terms.consumablesCategory, "other"];
   const { data: expenses = [] } = useExpenses();
+  const { data: patients = [] } = usePatients();
+  const { data: invoices = [] } = useInvoices();
   const { user } = useAuth();
   const createExpense = useCreateExpense();
   const deleteExpense = useDeleteExpense();
   const [search, setSearch] = useState("");
   const [catFilter, setCatFilter] = useState("all");
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [form, setForm] = useState({
+  const emptyForm = () => ({
     vendor: "", category: "other", description: "", amount: "",
     expense_date: format(new Date(), "yyyy-MM-dd"), payment_method: "cash", receipt_reference: "",
+    patient_id: "none", invoice_id: "none", frequency: "none" as ExpenseFrequency,
   });
+  const [form, setForm] = useState(emptyForm);
+
+  const patientName = useMemo(() => {
+    const m: Record<string, string> = {};
+    (patients as any[]).forEach((p) => { m[p.id] = `${p.first_name} ${p.last_name}`; });
+    return m;
+  }, [patients]);
+  const invoiceNumber = useMemo(() => {
+    const m: Record<string, string> = {};
+    (invoices as any[]).forEach((i) => { m[i.id] = i.invoice_number; });
+    return m;
+  }, [invoices]);
+  const patientInvoices = (invoices as any[]).filter((i) => form.patient_id === "none" || i.patient_id === form.patient_id);
 
   const filtered = expenses.filter((e: any) => {
-    const matchSearch = e.vendor.toLowerCase().includes(search.toLowerCase()) || e.description?.toLowerCase().includes(search.toLowerCase());
+    const q = search.toLowerCase();
+    const matchSearch = (e.vendor || "").toLowerCase().includes(q) || e.description?.toLowerCase().includes(q) || (e.patient_id && patientName[e.patient_id]?.toLowerCase().includes(q));
     const matchCat = catFilter === "all" || e.category === catFilter;
     return matchSearch && matchCat;
   });
@@ -50,19 +71,23 @@ export default function ExpensesPage() {
 
   const handleSubmit = () => {
     if (!form.vendor || !form.amount) return;
+    const description = [form.description.trim(), form.receipt_reference.trim() ? `Receipt: ${form.receipt_reference.trim()}` : ""].filter(Boolean).join(" · ");
     createExpense.mutate({
       vendor: form.vendor,
       category: form.category,
-      description: form.description,
+      description: description || null,
       amount: Number(form.amount),
       expense_date: form.expense_date,
       payment_method: form.payment_method,
-      receipt_reference: form.receipt_reference,
+      patient_id: form.patient_id === "none" ? null : form.patient_id,
+      invoice_id: form.invoice_id === "none" ? null : form.invoice_id,
+      is_recurring: form.frequency !== "none",
+      next_due_date: nextDueDate(form.expense_date, form.frequency),
       created_by: user?.id,
     }, {
       onSuccess: () => {
         setDialogOpen(false);
-        setForm({ vendor: "", category: "other", description: "", amount: "", expense_date: format(new Date(), "yyyy-MM-dd"), payment_method: "cash", receipt_reference: "" });
+        setForm(emptyForm());
       },
     });
   };
@@ -165,9 +190,18 @@ export default function ExpensesPage() {
                 {filtered.map((e: any) => (
                   <tr key={e.id} className="border-b last:border-0 hover:bg-muted/20">
                     <td className="py-2 px-4 text-muted-foreground">{e.expense_date}</td>
-                    <td className="py-2 px-4 font-medium">{e.vendor}</td>
+                    <td className="py-2 px-4 font-medium">
+                      {e.vendor}
+                      {(e.patient_id || e.invoice_id || e.is_recurring) && (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {e.patient_id && <Badge variant="secondary" className="text-[10px] gap-1"><User className="h-3 w-3" />{patientName[e.patient_id] || "Patient"}</Badge>}
+                          {e.invoice_id && <Badge variant="outline" className="text-[10px] gap-1 font-mono"><FileText className="h-3 w-3" />{invoiceNumber[e.invoice_id] || "Invoice"}</Badge>}
+                          {e.is_recurring && <Badge variant="outline" className="text-[10px] gap-1 capitalize border-primary/30 text-primary"><Repeat className="h-3 w-3" />{inferFrequency(e.expense_date, e.next_due_date, true)}{e.next_due_date ? ` · next ${e.next_due_date}` : ""}</Badge>}
+                        </div>
+                      )}
+                    </td>
                     <td className="py-2 px-4"><Badge variant="outline" className="text-[10px] capitalize">{formatCategory(e.category)}</Badge></td>
-                    <td className="py-2 px-4 font-medium text-red-600">₦{Number(e.amount).toLocaleString()}</td>
+                    <td className="py-2 px-4 font-medium text-destructive">₦{Number(e.amount).toLocaleString()}</td>
                     <td className="py-2 px-4 text-muted-foreground capitalize">{e.payment_method}</td>
                   </tr>
                 ))}
@@ -223,6 +257,47 @@ export default function ExpensesPage() {
                 <Label className="text-xs">Receipt Ref</Label>
                 <Input value={form.receipt_reference} onChange={e => setForm(f => ({ ...f, receipt_reference: e.target.value }))} />
               </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Linked patient (optional)</Label>
+                <Select value={form.patient_id} onValueChange={v => setForm(f => ({ ...f, patient_id: v, invoice_id: "none" }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    {(patients as any[]).map(p => <SelectItem key={p.id} value={p.id}>{p.first_name} {p.last_name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Linked invoice (optional)</Label>
+                <Select value={form.invoice_id} onValueChange={v => setForm(f => ({ ...f, invoice_id: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    {patientInvoices.map(i => <SelectItem key={i.id} value={i.id}>{i.invoice_number}{form.patient_id === "none" && i.patient_name ? ` — ${i.patient_name}` : ""}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="rounded-md border border-border p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="exp-recurring" className="text-xs">Recurring expense</Label>
+                <Switch id="exp-recurring" checked={form.frequency !== "none"} onCheckedChange={c => setForm(f => ({ ...f, frequency: c ? "monthly" : "none" }))} />
+              </div>
+              {form.frequency !== "none" && (
+                <div className="flex items-center gap-3">
+                  <Select value={form.frequency} onValueChange={v => setForm(f => ({ ...f, frequency: v as ExpenseFrequency }))}>
+                    <SelectTrigger className="w-[140px] h-8"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="weekly">Weekly</SelectItem>
+                      <SelectItem value="monthly">Monthly</SelectItem>
+                      <SelectItem value="annual">Annual</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <span className="text-xs text-muted-foreground">Next due {nextDueDate(form.expense_date, form.frequency)}</span>
+                </div>
+              )}
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Description</Label>
