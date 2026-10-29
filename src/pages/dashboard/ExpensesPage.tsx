@@ -1,10 +1,14 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { Switch } from "@/components/ui/switch";
+import { usePatients } from "@/hooks/usePatients";
+import { useInvoices } from "@/hooks/useInvoices";
+import { nextDueDate, inferFrequency, type ExpenseFrequency } from "@/lib/billingDisplay";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, DollarSign, Search, TrendingDown } from "lucide-react";
+import { Plus, DollarSign, Search, TrendingDown, Repeat, User, FileText } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { useExpenses, useCreateExpense, useDeleteExpense } from "@/hooks/useExpenses";
 import { useAuth } from "@/hooks/useAuth";
@@ -186,9 +190,18 @@ export default function ExpensesPage() {
                 {filtered.map((e: any) => (
                   <tr key={e.id} className="border-b last:border-0 hover:bg-muted/20">
                     <td className="py-2 px-4 text-muted-foreground">{e.expense_date}</td>
-                    <td className="py-2 px-4 font-medium">{e.vendor}</td>
+                    <td className="py-2 px-4 font-medium">
+                      {e.vendor}
+                      {(e.patient_id || e.invoice_id || e.is_recurring) && (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {e.patient_id && <Badge variant="secondary" className="text-[10px] gap-1"><User className="h-3 w-3" />{patientName[e.patient_id] || "Patient"}</Badge>}
+                          {e.invoice_id && <Badge variant="outline" className="text-[10px] gap-1 font-mono"><FileText className="h-3 w-3" />{invoiceNumber[e.invoice_id] || "Invoice"}</Badge>}
+                          {e.is_recurring && <Badge variant="outline" className="text-[10px] gap-1 capitalize border-primary/30 text-primary"><Repeat className="h-3 w-3" />{inferFrequency(e.expense_date, e.next_due_date, true)}{e.next_due_date ? ` · next ${e.next_due_date}` : ""}</Badge>}
+                        </div>
+                      )}
+                    </td>
                     <td className="py-2 px-4"><Badge variant="outline" className="text-[10px] capitalize">{formatCategory(e.category)}</Badge></td>
-                    <td className="py-2 px-4 font-medium text-red-600">₦{Number(e.amount).toLocaleString()}</td>
+                    <td className="py-2 px-4 font-medium text-destructive">₦{Number(e.amount).toLocaleString()}</td>
                     <td className="py-2 px-4 text-muted-foreground capitalize">{e.payment_method}</td>
                   </tr>
                 ))}
@@ -244,6 +257,47 @@ export default function ExpensesPage() {
                 <Label className="text-xs">Receipt Ref</Label>
                 <Input value={form.receipt_reference} onChange={e => setForm(f => ({ ...f, receipt_reference: e.target.value }))} />
               </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Linked patient (optional)</Label>
+                <Select value={form.patient_id} onValueChange={v => setForm(f => ({ ...f, patient_id: v, invoice_id: "none" }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    {(patients as any[]).map(p => <SelectItem key={p.id} value={p.id}>{p.first_name} {p.last_name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Linked invoice (optional)</Label>
+                <Select value={form.invoice_id} onValueChange={v => setForm(f => ({ ...f, invoice_id: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    {patientInvoices.map(i => <SelectItem key={i.id} value={i.id}>{i.invoice_number}{form.patient_id === "none" && i.patient_name ? ` — ${i.patient_name}` : ""}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="rounded-md border border-border p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="exp-recurring" className="text-xs">Recurring expense</Label>
+                <Switch id="exp-recurring" checked={form.frequency !== "none"} onCheckedChange={c => setForm(f => ({ ...f, frequency: c ? "monthly" : "none" }))} />
+              </div>
+              {form.frequency !== "none" && (
+                <div className="flex items-center gap-3">
+                  <Select value={form.frequency} onValueChange={v => setForm(f => ({ ...f, frequency: v as ExpenseFrequency }))}>
+                    <SelectTrigger className="w-[140px] h-8"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="weekly">Weekly</SelectItem>
+                      <SelectItem value="monthly">Monthly</SelectItem>
+                      <SelectItem value="annual">Annual</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <span className="text-xs text-muted-foreground">Next due {nextDueDate(form.expense_date, form.frequency)}</span>
+                </div>
+              )}
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Description</Label>
